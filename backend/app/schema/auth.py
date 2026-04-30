@@ -7,8 +7,8 @@ class Role(str, Enum):
     ADMIN = "ADMIN"
 
 class RegisterRequest(BaseModel):
-    firstname: str
-    lastname: Optional[str]
+    firstName: str
+    lastName: Optional[str]
     email: EmailStr 
     password: str
     role: Role = Role.MEMBER
