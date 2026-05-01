@@ -1,8 +1,9 @@
 export interface User {
-  id: string;
+  _id: string;
   email: string;
   firstName: string;
-  lastName: string;
+  lastName?: string | null;
+  role?: string;
 }
 
 export interface RegisterRequest {

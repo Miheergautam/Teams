@@ -8,6 +8,8 @@ interface Project {
   created_by: string;
 }
 
+const MIN_PROJECT_NAME_LENGTH = 3;
+
 function Projects() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [name, setName] = useState("");
@@ -32,15 +34,23 @@ function Projects() {
   };
 
   const createProject = async () => {
-    if (!name.trim()) {
+    const trimmedName = name.trim();
+    if (!trimmedName) {
       setError("Project name is required");
+      return;
+    }
+
+    if (trimmedName.length < MIN_PROJECT_NAME_LENGTH) {
+      setError(
+        `Project name must be at least ${MIN_PROJECT_NAME_LENGTH} characters`,
+      );
       return;
     }
 
     try {
       setIsCreating(true);
       setError(null);
-      await API.post("/projects/", { name: name.trim(), description });
+      await API.post("/projects/", { name: trimmedName, description });
       setName("");
       setDescription("");
       await fetchProjects();
@@ -81,6 +91,13 @@ function Projects() {
             onChange={(e) => setName(e.target.value)}
             disabled={isCreating}
           />
+          {name.trim().length > 0 &&
+            name.trim().length < MIN_PROJECT_NAME_LENGTH && (
+              <p className="text-xs text-red-600">
+                Project name must be at least {MIN_PROJECT_NAME_LENGTH}{" "}
+                characters
+              </p>
+            )}
 
           <textarea
             className="w-full border border-gray-300 p-3 rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -93,12 +110,14 @@ function Projects() {
 
           <button
             className={`w-full px-4 py-2 rounded font-medium transition-colors ${
-              isCreating
+              isCreating || name.trim().length < MIN_PROJECT_NAME_LENGTH
                 ? "bg-gray-400 text-white cursor-not-allowed"
                 : "bg-blue-500 hover:bg-blue-600 text-white"
             }`}
             onClick={createProject}
-            disabled={isCreating}
+            disabled={
+              isCreating || name.trim().length < MIN_PROJECT_NAME_LENGTH
+            }
           >
             {isCreating ? "Creating..." : "Create Project"}
           </button>

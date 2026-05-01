@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { ChangeEvent, useEffect, useState } from "react";
 import API from "../api/axios";
 
 type TaskStatus = "TODO" | "IN_PROGRESS" | "DONE";
@@ -20,28 +20,185 @@ interface Project {
   name: string;
 }
 
+interface UserCandidate {
+  _id: string;
+  firstName?: string;
+  lastName?: string | null;
+  email?: string;
+  role?: string;
+}
+
+interface ProjectMember {
+  _id: string;
+  user_id: string;
+  project_id: string;
+  role: string;
+  user?: {
+    _id: string;
+    firstName?: string;
+    lastName?: string | null;
+    email?: string;
+    role?: string;
+  } | null;
+}
+
+const MIN_TASK_NAME_LENGTH = 3;
+
 function Tasks() {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
+  const [members, setMembers] = useState<ProjectMember[]>([]);
+  const [candidates, setCandidates] = useState<UserCandidate[]>([]);
+  const [candidatesLoading, setCandidatesLoading] = useState(false);
+  const [candidatesError, setCandidatesError] = useState<string | null>(null);
+  const [selectedCandidateIds, setSelectedCandidateIds] = useState<string[]>(
+    [],
+  );
+  const [isAddingMembers, setIsAddingMembers] = useState(false);
   const [selectedProjectId, setSelectedProjectId] = useState<string>("");
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [dueDate, setDueDate] = useState("");
+  const [assignedTo, setAssignedTo] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
+  const [membersLoading, setMembersLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [membersError, setMembersError] = useState<string | null>(null);
+  const [pendingAssignees, setPendingAssignees] = useState<
+    Record<string, string[]>
+  >({});
+  const [updatingAssigneesId, setUpdatingAssigneesId] = useState<string | null>(
+    null,
+  );
   const [isCreating, setIsCreating] = useState(false);
   const [statusFilter, setStatusFilter] = useState<TaskStatus | "ALL">("ALL");
+
+  const isCreateTaskValid = name.trim().length >= MIN_TASK_NAME_LENGTH;
+
+  const getUserLabel = (user: UserCandidate) => {
+    const firstName = user.firstName?.trim();
+    const lastName = user.lastName?.trim();
+    const fullName = [firstName, lastName].filter(Boolean).join(" ");
+    if (fullName) return fullName;
+    if (user.email) return user.email;
+    return user._id;
+  };
+
+  const getMemberLabel = (member: ProjectMember) => {
+    const firstName = member.user?.firstName?.trim();
+    const lastName = member.user?.lastName?.trim();
+    const fullName = [firstName, lastName].filter(Boolean).join(" ");
+    if (fullName) return fullName;
+    if (member.user?.email) return member.user.email;
+    return member.user_id;
+  };
+
+  const getAssigneeLabel = (userId: string) => {
+    const member = members.find((m) => m.user_id === userId);
+    return member ? getMemberLabel(member) : userId;
+  };
 
   const fetchProjects = async () => {
     try {
       const res = await API.get<Project[]>("/projects/users");
       setProjects(res.data);
-      if (res.data.length > 0) {
-        setSelectedProjectId(res.data[0]._id);
-      }
+      setSelectedProjectId((prev) => {
+        if (res.data.length === 0) return "";
+        if (!prev) return res.data[0]._id;
+        return res.data.some((project) => project._id === prev)
+          ? prev
+          : res.data[0]._id;
+      });
     } catch (err: any) {
       console.error("Error fetching projects:", err);
       setError("Failed to load projects");
+    }
+  };
+
+  const fetchMembers = async (projectId?: string) => {
+    const project = projectId || selectedProjectId;
+    if (!project) {
+      setMembers([]);
+      return;
+    }
+
+    try {
+      setMembersLoading(true);
+      setMembersError(null);
+      const res = await API.get<ProjectMember[]>(
+        `/projects/${project}/members`,
+      );
+      setMembers(res.data);
+    } catch (err: any) {
+      const message = err.response?.data?.detail || "Failed to load members";
+      setMembersError(message);
+      setMembers([]);
+      console.error("Error fetching members:", err);
+    } finally {
+      setMembersLoading(false);
+    }
+  };
+
+  const fetchCandidates = async (projectId?: string) => {
+    const project = projectId || selectedProjectId;
+    if (!project) {
+      setCandidates([]);
+      return;
+    }
+
+    try {
+      setCandidatesLoading(true);
+      setCandidatesError(null);
+      const res = await API.get<UserCandidate[]>(
+        `/projects/${project}/member-candidates`,
+      );
+      setCandidates(res.data);
+      setSelectedCandidateIds([]);
+    } catch (err: any) {
+      const message = err.response?.data?.detail || "Failed to load candidates";
+      setCandidatesError(message);
+      setCandidates([]);
+      console.error("Error fetching candidates:", err);
+    } finally {
+      setCandidatesLoading(false);
+    }
+  };
+
+  const handleCandidateSelection = (event: ChangeEvent<HTMLSelectElement>) => {
+    const selected = Array.from(event.target.selectedOptions).map(
+      (option) => option.value,
+    );
+    setSelectedCandidateIds(selected);
+  };
+
+  const addMembers = async () => {
+    if (!selectedProjectId) {
+      setCandidatesError("Please select a project first");
+      return;
+    }
+
+    if (selectedCandidateIds.length === 0) {
+      setCandidatesError("Select at least one user to add");
+      return;
+    }
+
+    try {
+      setIsAddingMembers(true);
+      setCandidatesError(null);
+      await API.post(`/projects/${selectedProjectId}/add-members`, {
+        user_ids: selectedCandidateIds,
+        role: "MEMBER",
+      });
+      await fetchMembers(selectedProjectId);
+      await fetchCandidates(selectedProjectId);
+      setSelectedCandidateIds([]);
+    } catch (err: any) {
+      const message =
+        err.response?.data?.detail || "Failed to add project members";
+      setCandidatesError(message);
+      console.error("Error adding members:", err);
+    } finally {
+      setIsAddingMembers(false);
     }
   };
 
@@ -54,6 +211,11 @@ function Tasks() {
       setError(null);
       const res = await API.get<Task[]>(`/tasks/projects/${project}`);
       setTasks(res.data);
+      setPendingAssignees(
+        Object.fromEntries(
+          res.data.map((task) => [task._id, task.assigned_to]),
+        ),
+      );
     } catch (err: any) {
       const message = err.response?.data?.detail || "Failed to load tasks";
       setError(message);
@@ -64,8 +226,14 @@ function Tasks() {
   };
 
   const createTask = async () => {
-    if (!name.trim()) {
+    const trimmedName = name.trim();
+    if (!trimmedName) {
       setError("Task name is required");
+      return;
+    }
+
+    if (trimmedName.length < MIN_TASK_NAME_LENGTH) {
+      setError(`Task name must be at least ${MIN_TASK_NAME_LENGTH} characters`);
       return;
     }
 
@@ -78,15 +246,16 @@ function Tasks() {
       setIsCreating(true);
       setError(null);
       await API.post(`/tasks/projects/${selectedProjectId}`, {
-        name: name.trim(),
+        name: trimmedName,
         description,
-        assigned_to: [],
+        assigned_to: assignedTo,
         due_date: dueDate || undefined,
       });
 
       setName("");
       setDescription("");
       setDueDate("");
+      setAssignedTo([]);
       await fetchTasks();
     } catch (err: any) {
       const message = err.response?.data?.detail || "Failed to create task";
@@ -95,6 +264,30 @@ function Tasks() {
     } finally {
       setIsCreating(false);
     }
+  };
+
+  const handleAssigneesChange = (event: ChangeEvent<HTMLSelectElement>) => {
+    const selected = Array.from(event.target.selectedOptions).map(
+      (option) => option.value,
+    );
+    setAssignedTo(selected);
+  };
+
+  const handleTaskAssigneesChange = (
+    taskId: string,
+    event: ChangeEvent<HTMLSelectElement>,
+  ) => {
+    const selected = Array.from(event.target.selectedOptions).map(
+      (option) => option.value,
+    );
+    setPendingAssignees((prev) => ({ ...prev, [taskId]: selected }));
+  };
+
+  const areAssigneesEqual = (a: string[], b: string[]) => {
+    if (a.length !== b.length) return false;
+    const sortedA = [...a].sort();
+    const sortedB = [...b].sort();
+    return sortedA.every((value, index) => value === sortedB[index]);
   };
 
   const updateTaskStatus = async (taskId: string, newStatus: TaskStatus) => {
@@ -106,6 +299,27 @@ function Tasks() {
       const message = err.response?.data?.detail || "Failed to update task";
       setError(message);
       console.error("Error updating task:", err);
+    }
+  };
+
+  const updateTaskAssignees = async (taskId: string, assignees: string[]) => {
+    try {
+      setUpdatingAssigneesId(taskId);
+      setError(null);
+      setTasks((prev) =>
+        prev.map((task) =>
+          task._id === taskId ? { ...task, assigned_to: assignees } : task,
+        ),
+      );
+      await API.patch(`/tasks/${taskId}`, { assigned_to: assignees });
+      await fetchTasks();
+    } catch (err: any) {
+      const message =
+        err.response?.data?.detail || "Failed to update assignees";
+      setError(message);
+      console.error("Error updating assignees:", err);
+    } finally {
+      setUpdatingAssigneesId(null);
     }
   };
 
@@ -157,12 +371,32 @@ function Tasks() {
   useEffect(() => {
     if (selectedProjectId) {
       fetchTasks(selectedProjectId);
+      fetchMembers(selectedProjectId);
+      fetchCandidates(selectedProjectId);
+      setAssignedTo([]);
+      setPendingAssignees({});
+      setSelectedCandidateIds([]);
+      setCandidatesError(null);
+    } else {
+      setTasks([]);
+      setMembers([]);
+      setCandidates([]);
+      setAssignedTo([]);
+      setPendingAssignees({});
+      setSelectedCandidateIds([]);
+      setCandidatesError(null);
     }
   }, [selectedProjectId]);
 
   return (
     <div className="max-w-6xl mx-auto p-6">
       <h1 className="text-3xl font-bold mb-8 text-gray-900">Tasks</h1>
+
+      {error && (
+        <div className="mb-6 p-3 bg-red-50 border border-red-200 text-red-700 rounded">
+          {error}
+        </div>
+      )}
 
       {/* Project Selection */}
       <div className="mb-6">
@@ -190,17 +424,118 @@ function Tasks() {
 
       {selectedProjectId && (
         <>
+          {/* Project Members */}
+          <div className="mb-8 bg-white p-6 shadow-md rounded-lg border border-gray-200">
+            <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-2">
+              <h2 className="text-xl font-semibold text-gray-800">
+                People available for task assignment
+              </h2>
+              <button
+                className={`px-3 py-1 rounded text-xs font-medium transition-colors ${
+                  candidatesLoading
+                    ? "bg-gray-300 text-gray-600 cursor-not-allowed"
+                    : "bg-gray-200 hover:bg-gray-300 text-gray-700"
+                }`}
+                onClick={() => fetchCandidates(selectedProjectId)}
+                disabled={candidatesLoading}
+              >
+                {candidatesLoading ? "Refreshing..." : "Refresh"}
+              </button>
+            </div>
+
+            <div className="mt-4 grid gap-6 md:grid-cols-2">
+              <div>
+                <h3 className="text-sm font-semibold text-gray-700 mb-2">
+                  Current Members
+                </h3>
+                {membersLoading ? (
+                  <p className="text-sm text-gray-500">Loading members...</p>
+                ) : members.length === 0 ? (
+                  <p className="text-sm text-gray-500">
+                    No members found for this project
+                  </p>
+                ) : (
+                  <ul className="space-y-2">
+                    {members.map((member) => (
+                      <li
+                        key={member._id}
+                        className="flex items-center justify-between rounded border border-gray-200 px-3 py-2"
+                      >
+                        <span className="text-sm text-gray-800">
+                          {getMemberLabel(member)}
+                        </span>
+                        <span className="text-xs text-gray-500">
+                          {member.role}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                {membersError && (
+                  <p className="text-sm text-red-600 mt-2">{membersError}</p>
+                )}
+              </div>
+
+              <div>
+                <h3 className="text-sm font-semibold text-gray-700 mb-2">
+                  Available Users
+                </h3>
+                <p className="text-xs text-gray-500 mb-2">
+                  Hold Cmd (Mac) or Ctrl (Windows) to select multiple users.
+                </p>
+                {candidatesError && (
+                  <p className="text-sm text-red-600 mt-2">{candidatesError}</p>
+                )}
+                {candidatesLoading ? (
+                  <p className="text-sm text-gray-500">Loading users...</p>
+                ) : candidates.length === 0 ? (
+                  <p className="text-sm text-gray-500">
+                    No available users to add
+                  </p>
+                ) : (
+                  <div className="space-y-3">
+                    <select
+                      multiple
+                      value={selectedCandidateIds}
+                      onChange={handleCandidateSelection}
+                      className="w-full border border-gray-300 p-3 rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    >
+                      {candidates.map((user) => (
+                        <option key={user._id} value={user._id}>
+                          {getUserLabel(user)}
+                          {user.email ? ` (${user.email})` : ""}
+                        </option>
+                      ))}
+                    </select>
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs text-gray-500">
+                        Selected: {selectedCandidateIds.length}
+                      </span>
+                      <button
+                        className={`px-4 py-2 rounded text-sm font-medium transition-colors ${
+                          isAddingMembers || selectedCandidateIds.length === 0
+                            ? "bg-gray-400 text-white cursor-not-allowed"
+                            : "bg-green-500 hover:bg-green-600 text-white"
+                        }`}
+                        onClick={addMembers}
+                        disabled={
+                          isAddingMembers || selectedCandidateIds.length === 0
+                        }
+                      >
+                        {isAddingMembers ? "Adding..." : "Add Selected"}
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+
           {/* Create Task Form */}
           <div className="mb-8 bg-white p-6 shadow-md rounded-lg border border-gray-200">
             <h2 className="text-xl font-semibold mb-4 text-gray-800">
               Create New Task
             </h2>
-
-            {error && (
-              <div className="mb-4 p-3 bg-red-50 border border-red-200 text-red-700 rounded">
-                {error}
-              </div>
-            )}
 
             <div className="space-y-3">
               <input
@@ -210,6 +545,12 @@ function Tasks() {
                 onChange={(e) => setName(e.target.value)}
                 disabled={isCreating}
               />
+              {name.trim().length > 0 &&
+                name.trim().length < MIN_TASK_NAME_LENGTH && (
+                  <p className="text-xs text-red-600">
+                    Task name must be at least {MIN_TASK_NAME_LENGTH} characters
+                  </p>
+                )}
 
               <textarea
                 className="w-full border border-gray-300 p-3 rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -229,14 +570,45 @@ function Tasks() {
                 disabled={isCreating}
               />
 
+              <div className="space-y-2">
+                <label className="text-sm text-gray-600">Assign Members</label>
+                <p className="text-xs text-gray-500">
+                  Hold Cmd (Mac) or Ctrl (Windows) to select multiple members.
+                </p>
+                {membersLoading ? (
+                  <p className="text-sm text-gray-500">Loading members...</p>
+                ) : members.length === 0 ? (
+                  <p className="text-sm text-gray-500">
+                    No members available for this project
+                  </p>
+                ) : (
+                  <select
+                    multiple
+                    value={assignedTo}
+                    onChange={handleAssigneesChange}
+                    disabled={isCreating}
+                    className="w-full border border-gray-300 p-3 rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    {members.map((member) => (
+                      <option key={member._id} value={member.user_id}>
+                        {getMemberLabel(member)}
+                      </option>
+                    ))}
+                  </select>
+                )}
+                {membersError && (
+                  <p className="text-sm text-red-600">{membersError}</p>
+                )}
+              </div>
+
               <button
                 className={`w-full px-4 py-2 rounded font-medium transition-colors ${
-                  isCreating
+                  isCreating || !isCreateTaskValid
                     ? "bg-gray-400 text-white cursor-not-allowed"
                     : "bg-green-500 hover:bg-green-600 text-white"
                 }`}
                 onClick={createTask}
-                disabled={isCreating}
+                disabled={isCreating || !isCreateTaskValid}
               >
                 {isCreating ? "Creating..." : "Create Task"}
               </button>
@@ -334,10 +706,87 @@ function Tasks() {
                         )}
                       </div>
 
+                      {/* Assigned Members */}
+                      <div className="text-xs text-gray-500">
+                        {task.assigned_to.length > 0
+                          ? `Assigned: ${task.assigned_to
+                              .map(getAssigneeLabel)
+                              .join(", ")}`
+                          : "Unassigned"}
+                      </div>
+
                       {/* Due Date */}
                       {task.due_date && (
                         <div className="text-xs text-gray-500">
                           Due: {new Date(task.due_date).toLocaleDateString()}
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="mt-3">
+                      <label className="block text-xs text-gray-500 mb-1">
+                        Assign Members
+                      </label>
+                      {membersLoading ? (
+                        <p className="text-xs text-gray-400">
+                          Loading members...
+                        </p>
+                      ) : members.length === 0 ? (
+                        <p className="text-xs text-gray-400">
+                          No members available
+                        </p>
+                      ) : (
+                        <div className="space-y-2">
+                          <select
+                            multiple
+                            value={
+                              pendingAssignees[task._id] ?? task.assigned_to
+                            }
+                            onChange={(event) =>
+                              handleTaskAssigneesChange(task._id, event)
+                            }
+                            className="w-full border border-gray-300 p-2 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                            disabled={updatingAssigneesId === task._id}
+                          >
+                            {members.map((member) => (
+                              <option key={member._id} value={member.user_id}>
+                                {getMemberLabel(member)}
+                              </option>
+                            ))}
+                          </select>
+                          <div className="flex justify-end">
+                            <button
+                              className={`px-3 py-1 rounded text-xs font-medium transition-colors ${
+                                updatingAssigneesId === task._id ||
+                                areAssigneesEqual(
+                                  pendingAssignees[task._id] ??
+                                    task.assigned_to,
+                                  task.assigned_to,
+                                )
+                                  ? "bg-gray-300 text-gray-600 cursor-not-allowed"
+                                  : "bg-blue-500 hover:bg-blue-600 text-white"
+                              }`}
+                              onClick={() =>
+                                updateTaskAssignees(
+                                  task._id,
+                                  pendingAssignees[task._id] ??
+                                    task.assigned_to,
+                                )
+                              }
+                              disabled={
+                                updatingAssigneesId === task._id ||
+                                areAssigneesEqual(
+                                  pendingAssignees[task._id] ??
+                                    task.assigned_to,
+                                  task.assigned_to,
+                                )
+                              }
+                            >
+                              {updatingAssigneesId === task._id
+                                ? "Updating..."
+                                : "Save Assignees"}
+                            </button>
+                          </div>
                         </div>
                       )}
                     </div>
