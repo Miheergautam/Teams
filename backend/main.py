@@ -20,7 +20,7 @@ app = FastAPI(lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  
+    allow_origins=["https://teams-production-4b58.up.railway.app", "http://127.0.0.1:8000"],  
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
