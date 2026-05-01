@@ -23,6 +23,7 @@ app.add_middleware(
     allow_origins=[
         "https://026ac8e0.teams-1sv.pages.dev",
         "https://teams-production-4b58.up.railway.app",
+        "https://teams-1sv.pages.dev/"
         "http://127.0.0.1:8000",
     ],
     allow_credentials=True,
