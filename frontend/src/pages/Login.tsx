@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import API from "../api/axios";
 import { type LoginRequest } from "../types/auth";
 
-function Login(){
+function Login() {
   const navigate = useNavigate();
 
   const [form, setForm] = useState<LoginRequest>({
@@ -22,7 +22,7 @@ function Login(){
       const res = await API.post("/auth/login", form);
 
       // store token
-      localStorage.setItem("token", `Bearer ${res.data.token}`);
+      localStorage.setItem("token", res.data.token);
 
       // redirect
       navigate("/dashboard");
@@ -43,18 +43,14 @@ function Login(){
         type="email"
         placeholder="Email"
         value={form.email}
-        onChange={(e) =>
-          setForm({ ...form, email: e.target.value })
-        }
+        onChange={(e) => setForm({ ...form, email: e.target.value })}
       />
 
       <input
         type="password"
         placeholder="Password"
         value={form.password}
-        onChange={(e) =>
-          setForm({ ...form, password: e.target.value })
-        }
+        onChange={(e) => setForm({ ...form, password: e.target.value })}
       />
 
       <button onClick={handleLogin} disabled={loading}>
