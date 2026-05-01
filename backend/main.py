@@ -1,6 +1,8 @@
 from fastapi import FastAPI
 from contextlib import asynccontextmanager
 from shared.db.database import get_db
+from fastapi.middleware.cors import CORSMiddleware
+
 
 from app.router import router as app_router
 
@@ -15,6 +17,14 @@ async def lifespan(app: FastAPI):
     print("Disconnected from MongoDB")
 
 app = FastAPI(lifespan=lifespan)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 @app.get("/")
 async def get_health_status():
